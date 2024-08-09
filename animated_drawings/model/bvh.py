@@ -110,13 +110,13 @@ class BVH(Transform, TimeManager):
         for (start_joint_name, end_joint_name) in forward_perp_vector_joint_names:
             start_joint = self.root_joint.get_transform_by_name(start_joint_name)
             if not start_joint:
-                msg = f'Could not find BVH joint with name: {start_joint}'
+                msg = f'Could not find BVH joint with name: {start_joint_name}'
                 logging.critical(msg)
                 assert False, msg
 
             end_joint = self.root_joint.get_transform_by_name(end_joint_name)
             if not end_joint:
-                msg = f'Could not find BVH joint with name: {end_joint}'
+                msg = f'Could not find BVH joint with name: {end_joint_name}'
                 logging.critical(msg)
                 assert False, msg
 
@@ -138,7 +138,7 @@ class BVH(Transform, TimeManager):
             lines = f.read().splitlines()
 
         if lines.pop(0) != 'HIERARCHY':
-            msg = f'Malformed BVH in line preceeding {lines}'
+            msg = f'Malformed BVH in line preceding {lines}'
             logging.critical(msg)
             assert False, msg
 
@@ -146,7 +146,7 @@ class BVH(Transform, TimeManager):
         root_joint: BVH_Joint = BVH._parse_skeleton(lines)
 
         if lines.pop(0) != 'MOTION':
-            msg = f'Malformed BVH in line preceeding {lines}'
+            msg = f'Malformed BVH in line preceding {lines}'
             logging.critical(msg)
             assert False, msg
 
@@ -206,13 +206,13 @@ class BVH(Transform, TimeManager):
             assert False, msg
 
         if lines.pop(0).strip() != '{':
-            msg = f'Malformed BVH in line preceeding {lines}'
+            msg = f'Malformed BVH in line preceding {lines}'
             logging.critical(msg)
             assert False, msg
 
         # Get offset
         if not lines[0].strip().startswith('OFFSET'):
-            msg = f'Malformed BVH in line preceeding {lines}'
+            msg = f'Malformed BVH in line preceding {lines}'
             logging.critical(msg)
             assert False, msg
         _, *xyz = lines.pop(0).strip().split(' ')
@@ -225,7 +225,7 @@ class BVH(Transform, TimeManager):
         else:
             channel_num, channel_order = 0, []
         if int(channel_num) != len(channel_order):
-            msg = f'Malformed BVH in line preceeding {lines}'
+            msg = f'Malformed BVH in line preceding {lines}'
             logging.critical(msg)
             assert False, msg
 
@@ -240,6 +240,19 @@ class BVH(Transform, TimeManager):
     @classmethod
     def _process_frame_data(cls, skeleton: BVH_Joint, frames: List[List[float]]) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
         """ Given skeleton and frame data, return root position data and joint quaternion data, separately"""
+
+        def _get_frame_channel_order(joint: BVH_Joint, channels=[]):
+            channels.extend(joint.channel_order)
+            for child in [child for child in joint.get_children() if isinstance(child, BVH_Joint)]:
+                _get_frame_channel_order(child, channels)
+            return channels
+        channels = _get_frame_channel_order(skeleton)
+
+        # create a mask so we retain only joint rotations and root position
+        mask = np.array(list(map(lambda x: True if 'rotation' in x else False, channels)))
+        mask[:3] = True  # hack to make sure we keep root position
+
+        frames = np.array(frames, dtype=np.float32)[:, mask]
 
         # split root pose data and joint euler angle data
         pos_data, ea_rots = np.split(np.array(frames, dtype=np.float32), [3], axis=1)
